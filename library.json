@@ -1,0 +1,34 @@
+{
+  "name": "I3CBlaster",
+  "version": "0.0.0",
+  "description": "I3C protocol implementation for Raspberry Pi Pico",
+  "keywords": "I3C, protocol, pico, raspberry-pi",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/adafruit/I3CBlaster.git"
+  },
+  "license": "MIT",
+  "platforms": "rp2040",
+  "frameworks": "arduino, pico-sdk",
+  "export": {
+    "include": [
+      "src"
+    ],
+    "exclude": [
+      "src/main.c",
+      "src/ucli.c",
+      "src/python",
+      "hw",
+      "pictures",
+      "python",
+      "bin"
+    ]
+  },
+  "build": {
+    "srcDir": "src",
+    "includeDir": "src",
+    "srcFilter": [
+      "+<i3c_hl.c>"
+    ]
+  }
+}
