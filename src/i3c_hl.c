@@ -45,6 +45,7 @@ SOFTWARE.
 static uint32_t i3c_wdata_table[512];
 static uint8_t i3c_hl_arbcode;
 static uint8_t i3c_hl_gpiobasepin;
+static uint32_t i3c_hl_target_freq_khz = 10000u; // Track target frequency for clock adjustments
 static uint32_t i3c_hl_pio_program_sdr[32]; // copy of pio memory for fast exchange of SM. It is on purpose located in ram for fast copy action
 static uint32_t i3c_hl_pio_program_ddr[32]; // copy of pio memory for fast exchange of SM. It is on purpose located in ram for fast copy action
 
@@ -287,15 +288,23 @@ i3c_hl_status_t i3c_init(uint8_t gpiobasepin)
 
 i3c_hl_status_t i3c_hl_set_clkrate(uint32_t targetfreq_khz)
 {
-	if (targetfreq_khz > 12500u)
-		return i3c_hl_status_param_outofrange;
-	if (targetfreq_khz < 49u)
-		return i3c_hl_status_param_outofrange;
+    if (targetfreq_khz > 12500u)
+        return i3c_hl_status_param_outofrange;
+    if (targetfreq_khz < 49u)
+        return i3c_hl_status_param_outofrange;
 
-    //pio->sm[1].clkdiv = (uint32_t) (1.0f * (1 << 16));
-	pio0->sm[1].clkdiv = (12500*65536) / targetfreq_khz;
-	return i3c_hl_status_ok;
+    i3c_hl_target_freq_khz = targetfreq_khz;
+    
+    uint32_t sys_clock_hz = clock_get_hz(clk_sys);
+    uint32_t sys_clock_khz = sys_clock_hz / 1000u;
+    
+    // Use 64-bit math to prevent overflow, and divide the target by 10 
+    // because the PIO state machine requires 10 cycles per I3C bit.
+    pio0->sm[1].clkdiv = (uint32_t)( ((uint64_t)sys_clock_khz * 65536ULL) / ((uint64_t)targetfreq_khz * 10ULL) );
+    
+    return i3c_hl_status_ok;
 }
+
 
 i3c_hl_status_t i3c_hl_i2c_pinmode(bool enable_i2c_module)
 {
@@ -442,7 +451,7 @@ static inline uint8_t __not_in_flash_func(i3c_od_read8)(void)
 // returns true of SDA is low (IBI/HJ type 1)
 bool __not_in_flash_func(i3c_ibi_type1_check)(void)
 {
-	return ((iobank0_hw->io[i3c_hl_gpiobasepin].status & IO_BANK0_GPIO0_STATUS_INFROMPAD_BITS) >> IO_BANK0_GPIO0_STATUS_INFROMPAD_LSB) == 0;
+	return ((io_bank0_hw->io[i3c_hl_gpiobasepin].status & IO_BANK0_GPIO0_STATUS_INFROMPAD_BITS) >> IO_BANK0_GPIO0_STATUS_INFROMPAD_LSB) == 0;
 }
 
 // returns true when acked and no arbitration issue occured.

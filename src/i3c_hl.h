@@ -28,6 +28,10 @@ SOFTWARE.
 #include <stdint.h>
 #include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef enum
 {
     i3c_hl_status_ok                     = 0,
@@ -100,10 +104,19 @@ i3c_hl_status_t i3c_hl_ddr_read(uint8_t addr, uint8_t command, uint16_t *pdat, u
 // set drive strength for SDA and SCL outputs. Valid inputs are 2, 4, 8, 12. The units is in mA
 i3c_hl_status_t i3c_hl_set_drivestrength(uint8_t drivestrength_mA);
 
+// Adjust PIO timing for current system clock speed (for overclocking support)
+// Call this after changing the system clock speed to maintain proper I3C bus timing
+// The timings were calibrated for 133 MHz system clock
+i3c_hl_status_t i3c_hl_adjust_for_sys_clock(void);
+
 // switch gpio pinmux to either i2c mode or i3c mode. Use this function to execute i2c transfers using normal i2c API.
 // default wise the pinout is switched ti i3c mode after calling i3c_init().
 // enable_i2c_module            True to select i2c and give access to i2c IP behind it
 //                              False to select i3c (PIO) 
 i3c_hl_status_t i3c_hl_i2c_pinmode(bool enable_i2c_module);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif //_I3C_HL_H
