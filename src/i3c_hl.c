@@ -238,6 +238,11 @@ i3c_hl_status_t i3c_init(uint8_t gpiobasepin)
             (gpiobasepin << PIO_SM0_PINCTRL_IN_BASE_LSB)  |
             (2 << PIO_SM0_PINCTRL_SIDESET_COUNT_LSB) |
             ((gpiobasepin+1) << PIO_SM0_PINCTRL_SIDESET_BASE_LSB) ;
+	
+	gpio_init(gpiobasepin);
+	gpio_init(gpiobasepin+1);
+	gpio_disable_pulls(gpiobasepin);
+	gpio_disable_pulls(gpiobasepin+1);
     gpio_set_function(gpiobasepin, GPIO_FUNC_PIO0);
     gpio_set_function(gpiobasepin+1, GPIO_FUNC_PIO0);
 	gpio_set_drive_strength(gpiobasepin, GPIO_DRIVE_STRENGTH_12MA);
