@@ -367,11 +367,13 @@ static inline void __not_in_flash_func(i3c_restart)(void)
 
 static inline void __not_in_flash_func(i3c_stop)(void)
 {
-	i3c_pio_put32( I3CPIO_OPCODE_STOP ); // queue the stop condition
-    
-    // FIX: Wait for the TX FIFO to empty, then wait for the State Machine 
-    // to return to the instruction parser (address 0) ensuring the bus is physically idle.
+	i3c_pio_put32( I3CPIO_OPCODE_STOP );
 	i3c_pio_wait_tx_empty();
+	
+	// FIX: Give the PIO time to pull the STOP command from the FIFO 
+	// and transition its program counter away from Address 0.
+	busy_wait_us(2);
+	
 	while (pio0->sm[1].addr != 0); 
 }
 
