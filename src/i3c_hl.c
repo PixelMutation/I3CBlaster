@@ -87,31 +87,30 @@ static bool sm_is_in_ddr_mode;
 
 
 /* ------------------------------ APU functions ----------------------------- */
-
+// enable strong active pullup
 static inline void __not_in_flash_func(i3c_apu_enable)(void) {
     // Drives 3.3V through the 2.2k resistor to assist Open-Drain phases
     gpio_set_dir(i3c_hl_gpiobasepin + 2, GPIO_OUT); 
 }
-
+// disable strong active pullup
 static inline void __not_in_flash_func(i3c_apu_disable)(void) {
     // High-Z (disconnects resistor) for high-speed Push-Pull phases
     gpio_set_dir(i3c_hl_gpiobasepin + 2, GPIO_IN);  
 }
 
-/* ----------------------------- Wait functions ----------------------------- */
-
-static inline void __not_in_flash_func(i3c_wait_idle)(void) {
-    // Wait for TX FIFO to empty
-    i3c_pio_wait_tx_empty();
-    // Wait for the PIO state machine to return to the inst_parser (address 0)
-    while (pio0->sm[1].addr != 0); 
-}
-
+// wait for buffer to empty
 static inline void __not_in_flash_func(i3c_pio_wait_tx_empty)(void) 
 {
     while ( (pio0->fstat & (1u << (PIO_FSTAT_TXEMPTY_LSB + 1))) == 0 )
     {
 	}
+}
+// wait until idel period finished
+static inline void __not_in_flash_func(i3c_wait_idle)(void) {
+    // Wait for TX FIFO to empty
+    i3c_pio_wait_tx_empty();
+    // Wait for the PIO state machine to return to the inst_parser (address 0)
+    while (pio0->sm[1].addr != 0); 
 }
 
 // blocking write to pio pipeline
