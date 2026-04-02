@@ -86,6 +86,27 @@ static bool sm_is_in_ddr_mode;
 #define DDR_PARITY(data) ( (uint8_t)( ((uint32_t)__builtin_parity(((uint16_t)(data) & 0xaaaau)) << 1) | ((uint32_t)__builtin_parity(((uint16_t)(data) & 0x5555u))  ^ 1) ))
 
 
+/* ------------------------------ APU functions ----------------------------- */
+
+static inline void __not_in_flash_func(i3c_apu_enable)(void) {
+    // Drives 3.3V through the 2.2k resistor to assist Open-Drain phases
+    gpio_set_dir(i3c_hl_gpiobasepin + 2, GPIO_OUT); 
+}
+
+static inline void __not_in_flash_func(i3c_apu_disable)(void) {
+    // High-Z (disconnects resistor) for high-speed Push-Pull phases
+    gpio_set_dir(i3c_hl_gpiobasepin + 2, GPIO_IN);  
+}
+
+/* ----------------------------- Wait functions ----------------------------- */
+
+static inline void __not_in_flash_func(i3c_wait_idle)(void) {
+    // Wait for TX FIFO to empty
+    i3c_pio_wait_tx_empty();
+    // Wait for the PIO state machine to return to the inst_parser (address 0)
+    while (pio0->sm[1].addr != 0); 
+}
+
 static inline void __not_in_flash_func(i3c_pio_wait_tx_empty)(void) 
 {
     while ( (pio0->fstat & (1u << (PIO_FSTAT_TXEMPTY_LSB + 1))) == 0 )
@@ -334,24 +355,30 @@ i3c_hl_status_t i3c_hl_i2c_pinmode(bool enable_i2c_module)
 // returns TRUE on success (acked)
 i3c_hl_status_t __not_in_flash_func(i3c_sdr_write_addr)(uint8_t value)
 {
-	uint32_t cmdword0,  cmdword1, resp;
-	i3c_hl_status_t retcode = i3c_hl_status_ok;
+    uint32_t cmdword0,  cmdword1, resp;
+    i3c_hl_status_t retcode = i3c_hl_status_ok;
 
-	i3c_pio_wait_tx_empty(); // wait until tx pipe is empty. Afterwards 4 words can be written without full check
-	i3c_pio_set_autopush(9);
+    i3c_apu_enable(); // TURN ON APU
 
-	cmdword0 = I3CPIO_OPCODE_XFER(6, SDR_WBIT((value>>7)&1), SDR_WBIT((value>>6)&1), SDR_WBIT((value>>5)&1), SDR_WBIT((value>>4)&1), SDR_WBIT((value>>3)&1), SDR_WBIT((value>>2)&1));
-	cmdword1 = I3CPIO_OPCODE_XFER(3, SDR_WBIT((value>>1)&1), SDR_WBIT((value>>0)&1), OD_RACKBIT, 0, 0, 0);
+    i3c_pio_wait_tx_empty(); 
+    i3c_pio_set_autopush(9);
 
-	i3c_pio_put32_no_check(cmdword0);
-	i3c_pio_put32_no_check(cmdword1);
-	i3c_pio_put32_no_check(I3CPIO_OPCODE_SCL0); // avoid high phase beeing too long
-	resp = i3c_pio_get32();
-	if (resp & 1)
-	{
-		retcode = i3c_hl_status_nak_during_sdraddr;
-	}
-	return retcode;
+    cmdword0 = I3CPIO_OPCODE_XFER(6, SDR_WBIT((value>>7)&1), SDR_WBIT((value>>6)&1), SDR_WBIT((value>>5)&1), SDR_WBIT((value>>4)&1), SDR_WBIT((value>>3)&1), SDR_WBIT((value>>2)&1));
+    cmdword1 = I3CPIO_OPCODE_XFER(3, SDR_WBIT((value>>1)&1), SDR_WBIT((value>>0)&1), OD_RACKBIT, 0, 0, 0);
+
+    i3c_pio_put32_no_check(cmdword0);
+    i3c_pio_put32_no_check(cmdword1);
+    i3c_pio_put32_no_check(I3CPIO_OPCODE_SCL0); // avoid high phase beeing too long
+    resp = i3c_pio_get32();
+    
+    i3c_wait_idle();   // Wait for PIO to fully finish the 9th bit
+    i3c_apu_disable(); // TURN OFF APU
+    
+    if (resp & 1)
+    {
+        retcode = i3c_hl_status_nak_during_sdraddr;
+    }
+    return retcode;
 }
 
 static inline void __not_in_flash_func(i3c_start)(void)
@@ -411,48 +438,67 @@ static uint32_t __not_in_flash_func(i3c_sdr_read)(uint8_t continuetransfer)
 
 static void __not_in_flash_func(i3c_od_write)(uint8_t value)
 {
-	uint32_t cmdword0,  cmdword1;
+    uint32_t cmdword0,  cmdword1;
 
-	i3c_pio_wait_tx_empty(); // wait until tx pipe is empty. Afterwards 4 words can be written without full check
-	i3c_pio_set_autopush(9);
-	cmdword0 = I3CPIO_OPCODE_XFER(6, OD_WBIT((value>>7)&1), OD_WBIT((value>>6)&1), OD_WBIT((value>>5)&1), OD_WBIT((value>>4)&1), OD_WBIT((value>>3)&1), OD_WBIT((value>>2)&1));
-	cmdword1 = I3CPIO_OPCODE_XFER(3, OD_WBIT((value>>1)&1), OD_WBIT((value>>0)&1), OD_RACKBIT, 0, 0, 0);
-	
-	i3c_pio_put32_no_check(cmdword0);
-	i3c_pio_put32_no_check(cmdword1);	
-	i3c_pio_put32_no_check(I3CPIO_OPCODE_SCL0); // avoid high phase beeing too long
-	uint32_t data = i3c_pio_get32();	
+    i3c_apu_enable(); // TURN ON APU
+
+    i3c_pio_wait_tx_empty(); 
+    i3c_pio_set_autopush(9);
+    cmdword0 = I3CPIO_OPCODE_XFER(6, OD_WBIT((value>>7)&1), OD_WBIT((value>>6)&1), OD_WBIT((value>>5)&1), OD_WBIT((value>>4)&1), OD_WBIT((value>>3)&1), OD_WBIT((value>>2)&1));
+    cmdword1 = I3CPIO_OPCODE_XFER(3, OD_WBIT((value>>1)&1), OD_WBIT((value>>0)&1), OD_RACKBIT, 0, 0, 0);
+    
+    i3c_pio_put32_no_check(cmdword0);
+    i3c_pio_put32_no_check(cmdword1);   
+    i3c_pio_put32_no_check(I3CPIO_OPCODE_SCL0); 
+    uint32_t data = i3c_pio_get32();    
+
+    i3c_wait_idle();   // Wait for PIO to finish
+    i3c_apu_disable(); // TURN OFF APU
 }
 
 static inline uint8_t __not_in_flash_func(i3c_od_read)(uint8_t ack)
 {
-	uint32_t cmdword0,  cmdword1, data;
+    uint32_t cmdword0,  cmdword1, data;
 
-	i3c_pio_wait_tx_empty(); // wait until tx pipe is empty. Afterwards 4 words can be written without full check
-	i3c_pio_set_autopush(9);
-	cmdword0 = I3CPIO_OPCODE_XFER(6, OD_RBIT, OD_RBIT, OD_RBIT, OD_RBIT, OD_RBIT, OD_RBIT);
-	cmdword1 = I3CPIO_OPCODE_XFER(3, OD_RBIT, OD_RBIT, OD_WBIT((ack^1)&1), 0, 0, 0);
-	i3c_pio_put32_no_check(cmdword0);
-	i3c_pio_put32_no_check(cmdword1);	
-	i3c_pio_put32_no_check(I3CPIO_OPCODE_SCL0); // avoid high phase beeing too long
-	data = i3c_pio_get32();
-	return ((uint8_t)(data>>1));
+    i3c_apu_enable(); // TURN ON APU
+
+    i3c_pio_wait_tx_empty(); 
+    i3c_pio_set_autopush(9);
+    cmdword0 = I3CPIO_OPCODE_XFER(6, OD_RBIT, OD_RBIT, OD_RBIT, OD_RBIT, OD_RBIT, OD_RBIT);
+    cmdword1 = I3CPIO_OPCODE_XFER(3, OD_RBIT, OD_RBIT, OD_WBIT((ack^1)&1), 0, 0, 0);
+    
+    i3c_pio_put32_no_check(cmdword0);
+    i3c_pio_put32_no_check(cmdword1);   
+    i3c_pio_put32_no_check(I3CPIO_OPCODE_SCL0); 
+    data = i3c_pio_get32();
+
+    i3c_wait_idle();   // Wait for PIO to finish
+    i3c_apu_disable(); // TURN OFF APU
+
+    return ((uint8_t)(data>>1));
 }
 
 static inline uint8_t __not_in_flash_func(i3c_od_read8)(void)
 {
-	uint32_t cmdword0,  cmdword1;
-	uint8_t readdata;
+    uint32_t cmdword0,  cmdword1;
+    uint8_t readdata;
 
-	i3c_pio_wait_tx_empty(); // wait until tx pipe is empty. Afterwards 4 words can be written without full check
-	i3c_pio_set_autopush(8);
-	cmdword0 = I3CPIO_OPCODE_XFER(6, OD_RBIT, OD_RBIT, OD_RBIT, OD_RBIT, OD_RBIT, OD_RBIT);
-	cmdword1 = I3CPIO_OPCODE_XFER(2, OD_RBIT, OD_RBIT, 0, 0, 0, 0);
-	i3c_pio_put32_no_check(cmdword0);
-	i3c_pio_put32_no_check(cmdword1);
-	i3c_pio_put32_no_check(I3CPIO_OPCODE_SCL0); // avoid high phase beeing too long
-	readdata =  (uint8_t)i3c_pio_get32();
-	return readdata;
+    i3c_apu_enable(); // TURN ON APU
+
+    i3c_pio_wait_tx_empty(); 
+    i3c_pio_set_autopush(8);
+    cmdword0 = I3CPIO_OPCODE_XFER(6, OD_RBIT, OD_RBIT, OD_RBIT, OD_RBIT, OD_RBIT, OD_RBIT);
+    cmdword1 = I3CPIO_OPCODE_XFER(2, OD_RBIT, OD_RBIT, 0, 0, 0, 0);
+    
+    i3c_pio_put32_no_check(cmdword0);
+    i3c_pio_put32_no_check(cmdword1);
+    i3c_pio_put32_no_check(I3CPIO_OPCODE_SCL0); 
+    readdata =  (uint8_t)i3c_pio_get32();
+
+    i3c_wait_idle();   // Wait for PIO to finish
+    i3c_apu_disable(); // TURN OFF APU
+
+    return readdata;
 }
 
 // returns true of SDA is low (IBI/HJ type 1)
@@ -465,44 +511,52 @@ bool __not_in_flash_func(i3c_ibi_type1_check)(void)
 // *parbdata will contain the sensed data during transmit, enabling to detect e.g. IBI source
 static i3c_hl_status_t __not_in_flash_func(i3c_arbhdr)(uint8_t *parbdata)
 {
-	uint32_t cmdword0, cmdword1, cmdword2;
-	uint32_t data0, data1;
-	uint8_t  arbdata;
-	i3c_hl_status_t retcode = i3c_hl_status_ok;
+    uint32_t cmdword0, cmdword1, cmdword2;
+    uint32_t data0, data1;
+    uint8_t  arbdata;
+    i3c_hl_status_t retcode = i3c_hl_status_ok;
 
-	i3c_pio_wait_tx_empty(); // wait until tx pipe is empty. Afterwards 4 words can be written without full check
-	i3c_pio_set_autopush(6);
-	cmdword0 = I3CPIO_OPCODE_XFER(6, OD_WBIT(1), OD_WBIT(1), OD_WBIT(1), OD_WBIT(1), OD_WBIT(1), OD_WBIT(1));
-	cmdword1 = I3CPIO_OPCODE_XFER(3, OD_WBIT(0), OD_WBIT(0), OD_RACKBIT, 0, 0, 0); // normal case: no arbitration happened
-	cmdword2 = I3CPIO_OPCODE_XFER(3, OD_WBIT(1), OD_WBIT(1), OD_WBIT(0), 0, 0, 0); // used when arbitration won by target, this will get a read  which we need to ACK
+    i3c_apu_enable(); // TURN ON APU
 
-	i3c_pio_put32_no_check(cmdword0);
-	i3c_pio_put32_no_check(I3CPIO_OPCODE_SCL0); // in debug build the high period would be too long and pass through i2c glitch filters, so make it low to prevent this
-	data0 = i3c_pio_get32();
-	i3c_pio_set_autopush(3);
-	if (data0 == 0x3ful)
-	{ // no arbitration occured (transmitted 6 high bits and received 6 high bits)
-		i3c_pio_put32_no_check(cmdword1);	
-		i3c_pio_put32_no_check(I3CPIO_OPCODE_SCL0); // avoid high phase beeing too long
-		data1 = i3c_pio_get32();
-		if (data1 & 1)
-		{
-			retcode = i3c_hl_status_nak_during_arbhdr;
-		}
-	}
-	else
-	{ // arbitration occured (IBI raised - collect data)
-		i3c_pio_put32_no_check(cmdword2);	
-		i3c_pio_put32_no_check(I3CPIO_OPCODE_SCL0); // avoid high phase beeing too long
-		data1 = i3c_pio_get32();
-		retcode = i3c_hl_status_ibi;
-	}
-	arbdata = (data0<<2) | (data1>>1); // strip away ACK bit
-	if (parbdata)
-		*parbdata = arbdata;
+    i3c_pio_wait_tx_empty(); 
+    i3c_pio_set_autopush(6);
+    cmdword0 = I3CPIO_OPCODE_XFER(6, OD_WBIT(1), OD_WBIT(1), OD_WBIT(1), OD_WBIT(1), OD_WBIT(1), OD_WBIT(1));
+    cmdword1 = I3CPIO_OPCODE_XFER(3, OD_WBIT(0), OD_WBIT(0), OD_RACKBIT, 0, 0, 0); 
+    cmdword2 = I3CPIO_OPCODE_XFER(3, OD_WBIT(1), OD_WBIT(1), OD_WBIT(0), 0, 0, 0); 
 
-	i3c_hl_arbcode = arbdata;
-	return retcode; // Bit 0 of data 1 is the last bit sampled, thus the ACK bit
+    i3c_pio_put32_no_check(cmdword0);
+    i3c_pio_put32_no_check(I3CPIO_OPCODE_SCL0); 
+    data0 = i3c_pio_get32();
+    
+    i3c_pio_set_autopush(3);
+    if (data0 == 0x3ful)
+    { 
+        i3c_pio_put32_no_check(cmdword1);   
+        i3c_pio_put32_no_check(I3CPIO_OPCODE_SCL0); 
+        data1 = i3c_pio_get32();
+        if (data1 & 1)
+        {
+            retcode = i3c_hl_status_nak_during_arbhdr;
+        }
+    }
+    else
+    { 
+        i3c_pio_put32_no_check(cmdword2);   
+        i3c_pio_put32_no_check(I3CPIO_OPCODE_SCL0); 
+        data1 = i3c_pio_get32();
+        retcode = i3c_hl_status_ibi;
+    }
+    
+    arbdata = (data0<<2) | (data1>>1); 
+    if (parbdata)
+        *parbdata = arbdata;
+
+    i3c_hl_arbcode = arbdata;
+
+    i3c_wait_idle();   // Wait for PIO to finish
+    i3c_apu_disable(); // TURN OFF APU
+
+    return retcode; 
 }
 
 // execute entdaa process. Return TRUE on success. FALSE when no target responded
