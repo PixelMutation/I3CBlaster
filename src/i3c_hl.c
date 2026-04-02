@@ -90,12 +90,14 @@ static bool sm_is_in_ddr_mode;
 // enable strong active pullup
 static inline void __not_in_flash_func(i3c_apu_enable)(void) {
     // Drives 3.3V through the 2.2k resistor to assist Open-Drain phases
+    gpio_put(i3c_hl_gpiobasepin + 2, 1);
     gpio_set_dir(i3c_hl_gpiobasepin + 2, GPIO_OUT); 
 }
 // disable strong active pullup
 static inline void __not_in_flash_func(i3c_apu_disable)(void) {
     // High-Z (disconnects resistor) for high-speed Push-Pull phases
-    gpio_set_dir(i3c_hl_gpiobasepin + 2, GPIO_IN);  
+    gpio_set_dir(i3c_hl_gpiobasepin + 2, GPIO_IN);
+    gpio_set_pulls(i3c_hl_gpiobasepin + 2, false, false);  // Disable both pullup and pulldown
 }
 
 // wait for buffer to empty
@@ -393,14 +395,18 @@ static inline void __not_in_flash_func(i3c_restart)(void)
 
 static inline void __not_in_flash_func(i3c_stop)(void)
 {
-	i3c_pio_put32( I3CPIO_OPCODE_STOP );
-	i3c_pio_wait_tx_empty();
-	
-	// FIX: Give the PIO time to pull the STOP command from the FIFO 
-	// and transition its program counter away from Address 0.
-	busy_wait_us(2);
-	
-	while (pio0->sm[1].addr != 0); 
+    i3c_apu_enable(); // <--- FIX: Turn ON APU to guarantee a sharp STOP condition
+    
+    i3c_pio_put32( I3CPIO_OPCODE_STOP );
+    i3c_pio_wait_tx_empty();
+    
+    // Give the PIO time to pull the STOP command from the FIFO 
+    // and transition its program counter away from Address 0.
+    busy_wait_us(2);
+    
+    while (pio0->sm[1].addr != 0); 
+    
+    i3c_apu_disable(); // <--- FIX: Turn OFF APU after bus returns to IDLE
 }
 
 void __not_in_flash_func(i3c_sdr_write)(uint8_t value)

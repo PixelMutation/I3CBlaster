@@ -49,7 +49,7 @@ static const uint16_t i3c_program_instructions[] = {
     0x7001, // 23: out    pins, 1         side 0     
     0x6041, // 24: out    y, 1                       
     0x007c, // 25: jmp    !y, 28                     
-    0xe34f, // 26: set    y, 15                  [3] 
+    0xe341, // 26: set    y, 1                   [3] 
     0x079b, // 27: jmp    y--, 27                [7] 
     0x4001, // 28: in     pins, 1                    
     0x7881, // 29: out    pindirs, 1      side 1     

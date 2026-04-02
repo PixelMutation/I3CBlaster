@@ -49,7 +49,7 @@ fastentry:
     out pins, 1         side 0 [0]          ; bit 0 = pinstate falling edge         ; 1
         out y, 1                            ; bit 2 = opendrain delay (1=enable)
         jmp !y, skipdelay
-        set y, 15              [3] ; this sets the delay length. increase to allow slower rise. originally 1
+        set y, 1              [3] ; this sets the delay length. increase to allow slower rise. originally 1
 delay:
         jmp y--, delay         [7]
 skipdelay:        
