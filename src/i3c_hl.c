@@ -86,24 +86,18 @@ static bool sm_is_in_ddr_mode;
 #define DDR_PARITY(data) ( (uint8_t)( ((uint32_t)__builtin_parity(((uint16_t)(data) & 0xaaaau)) << 1) | ((uint32_t)__builtin_parity(((uint16_t)(data) & 0x5555u))  ^ 1) ))
 
 
+/* ------------------------------ APU functions ----------------------------- */
+// enable strong active pullup
 static inline void __not_in_flash_func(i3c_apu_enable)(void) {
+    // Drives 3.3V through the 2.2k resistor to assist Open-Drain phases
     gpio_put(i3c_hl_gpiobasepin + 2, 1);
     gpio_set_dir(i3c_hl_gpiobasepin + 2, GPIO_OUT); 
 }
-
+// disable strong active pullup
 static inline void __not_in_flash_func(i3c_apu_disable)(void) {
+    // High-Z (disconnects resistor) for high-speed Push-Pull phases
     gpio_set_dir(i3c_hl_gpiobasepin + 2, GPIO_IN);
-}
-
-static inline void __not_in_flash_func(i3c_pio_wait_tx_empty)(void) {
-    while ( (pio0->fstat & (1u << (PIO_FSTAT_TXEMPTY_LSB + 1))) == 0 ) {}
-}
-
-static inline void __not_in_flash_func(i3c_wait_idle)(void) {
-    i3c_pio_wait_tx_empty();
-    // Prevent CPU from outrunning PIO command fetch
-    busy_wait_us(2); 
-    while (pio0->sm[1].addr != 0); 
+    gpio_set_pulls(i3c_hl_gpiobasepin + 2, false, false);  // Disable both pullup and pulldown
 }
 
 // wait for buffer to empty
@@ -279,12 +273,12 @@ i3c_hl_status_t i3c_init(uint8_t gpiobasepin)
 	gpio_set_slew_rate(gpiobasepin, GPIO_SLEW_RATE_FAST);
 	gpio_set_slew_rate(gpiobasepin+1, GPIO_SLEW_RATE_FAST);
 	
-	// Initialize APU as ON by default
-    gpio_init(gpiobasepin + 2);
+	gpio_init(gpiobasepin + 2);
 	gpio_disable_pulls(gpiobasepin);
     gpio_disable_pulls(gpiobasepin+1);
-    i3c_apu_enable();
-
+	gpio_disable_pulls(gpiobasepin+2);
+    // i3c_apu_enable();
+	
 	// set wrap target
     pio->sm[1].execctrl = (       i3c_wrap << PIO_SM0_EXECCTRL_WRAP_TOP_LSB) |
 	                      (i3c_wrap_target << PIO_SM0_EXECCTRL_WRAP_BOTTOM_LSB) | 
@@ -417,6 +411,7 @@ static inline void __not_in_flash_func(i3c_stop)(void)
     
     i3c_pio_put32( I3CPIO_OPCODE_STOP );
     
+    // Use our patched wait function to ensure the STOP completes and the bus is HIGH
     i3c_wait_idle(); 
     
     i3c_apu_disable(); // Turn OFF APU
