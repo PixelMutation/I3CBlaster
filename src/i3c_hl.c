@@ -86,18 +86,24 @@ static bool sm_is_in_ddr_mode;
 #define DDR_PARITY(data) ( (uint8_t)( ((uint32_t)__builtin_parity(((uint16_t)(data) & 0xaaaau)) << 1) | ((uint32_t)__builtin_parity(((uint16_t)(data) & 0x5555u))  ^ 1) ))
 
 
-/* ------------------------------ APU functions ----------------------------- */
-// enable strong active pullup
 static inline void __not_in_flash_func(i3c_apu_enable)(void) {
-    // Drives 3.3V through the 2.2k resistor to assist Open-Drain phases
     gpio_put(i3c_hl_gpiobasepin + 2, 1);
     gpio_set_dir(i3c_hl_gpiobasepin + 2, GPIO_OUT); 
 }
-// disable strong active pullup
+
 static inline void __not_in_flash_func(i3c_apu_disable)(void) {
-    // High-Z (disconnects resistor) for high-speed Push-Pull phases
     gpio_set_dir(i3c_hl_gpiobasepin + 2, GPIO_IN);
-    gpio_set_pulls(i3c_hl_gpiobasepin + 2, false, false);  // Disable both pullup and pulldown
+}
+
+static inline void __not_in_flash_func(i3c_pio_wait_tx_empty)(void) {
+    while ( (pio0->fstat & (1u << (PIO_FSTAT_TXEMPTY_LSB + 1))) == 0 ) {}
+}
+
+static inline void __not_in_flash_func(i3c_wait_idle)(void) {
+    i3c_pio_wait_tx_empty();
+    // Prevent CPU from outrunning PIO command fetch
+    busy_wait_us(2); 
+    while (pio0->sm[1].addr != 0); 
 }
 
 // wait for buffer to empty
@@ -111,8 +117,14 @@ static inline void __not_in_flash_func(i3c_pio_wait_tx_empty)(void)
 static inline void __not_in_flash_func(i3c_wait_idle)(void) {
     // Wait for TX FIFO to empty
     i3c_pio_wait_tx_empty();
+    
+    // Wait for PIO to pull the trailing command from the FIFO
+    busy_wait_us(2); 
+    
     // Wait for the PIO state machine to return to the inst_parser (address 0)
     while (pio0->sm[1].addr != 0); 
+    
+    busy_wait_us(2); 
 }
 
 // blocking write to pio pipeline
@@ -266,6 +278,12 @@ i3c_hl_status_t i3c_init(uint8_t gpiobasepin)
 	gpio_set_drive_strength(gpiobasepin+1, GPIO_DRIVE_STRENGTH_12MA);
 	gpio_set_slew_rate(gpiobasepin, GPIO_SLEW_RATE_FAST);
 	gpio_set_slew_rate(gpiobasepin+1, GPIO_SLEW_RATE_FAST);
+	
+	// Initialize APU as ON by default
+    gpio_init(gpiobasepin + 2);
+	gpio_disable_pulls(gpiobasepin);
+    gpio_disable_pulls(gpiobasepin+1);
+    i3c_apu_enable();
 
 	// set wrap target
     pio->sm[1].execctrl = (       i3c_wrap << PIO_SM0_EXECCTRL_WRAP_TOP_LSB) |
@@ -395,18 +413,13 @@ static inline void __not_in_flash_func(i3c_restart)(void)
 
 static inline void __not_in_flash_func(i3c_stop)(void)
 {
-    i3c_apu_enable(); // <--- FIX: Turn ON APU to guarantee a sharp STOP condition
+    i3c_apu_enable(); // Turn ON APU to guarantee a sharp STOP condition
     
     i3c_pio_put32( I3CPIO_OPCODE_STOP );
-    i3c_pio_wait_tx_empty();
     
-    // Give the PIO time to pull the STOP command from the FIFO 
-    // and transition its program counter away from Address 0.
-    busy_wait_us(2);
+    i3c_wait_idle(); 
     
-    while (pio0->sm[1].addr != 0); 
-    
-    i3c_apu_disable(); // <--- FIX: Turn OFF APU after bus returns to IDLE
+    i3c_apu_disable(); // Turn OFF APU
 }
 
 void __not_in_flash_func(i3c_sdr_write)(uint8_t value)
