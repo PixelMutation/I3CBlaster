@@ -372,7 +372,7 @@ static inline void __not_in_flash_func(i3c_stop)(void)
 	
 	// FIX: Give the PIO time to pull the STOP command from the FIFO 
 	// and transition its program counter away from Address 0.
-	busy_wait_us(2);
+	busy_wait_us(10);
 	
 	while (pio0->sm[1].addr != 0); 
 }
