@@ -414,7 +414,7 @@ static inline void __not_in_flash_func(i3c_stop)(void)
     // Use our patched wait function to ensure the STOP completes and the bus is HIGH
     i3c_wait_idle(); 
     
-    i3c_apu_disable(); // Turn OFF APU
+    // i3c_apu_disable(); // Turn OFF APU
 }
 
 void __not_in_flash_func(i3c_sdr_write)(uint8_t value)
