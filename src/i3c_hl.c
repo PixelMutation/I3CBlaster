@@ -273,10 +273,11 @@ i3c_hl_status_t i3c_init(uint8_t gpiobasepin)
 	gpio_set_slew_rate(gpiobasepin, GPIO_SLEW_RATE_FAST);
 	gpio_set_slew_rate(gpiobasepin+1, GPIO_SLEW_RATE_FAST);
 	
-	gpio_init(gpiobasepin + 2);
-	gpio_disable_pulls(gpiobasepin);
-    gpio_disable_pulls(gpiobasepin+1);
-	gpio_disable_pulls(gpiobasepin+2);
+	gpio_init(gpiobasepin + 2); // init APU
+	gpio_disable_pulls(gpiobasepin+2); // disable APU pulls
+	gpio_disable_pulls(gpiobasepin+1); // disable SCL pulls
+	gpio_pull_up(gpiobasepin); // enable weak SDA pullup
+	
 	
 	// set wrap target
     pio->sm[1].execctrl = (       i3c_wrap << PIO_SM0_EXECCTRL_WRAP_TOP_LSB) |
