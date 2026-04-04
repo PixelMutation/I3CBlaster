@@ -277,7 +277,6 @@ i3c_hl_status_t i3c_init(uint8_t gpiobasepin)
 	gpio_disable_pulls(gpiobasepin);
     gpio_disable_pulls(gpiobasepin+1);
 	gpio_disable_pulls(gpiobasepin+2);
-    // i3c_apu_enable();
 	
 	// set wrap target
     pio->sm[1].execctrl = (       i3c_wrap << PIO_SM0_EXECCTRL_WRAP_TOP_LSB) |
