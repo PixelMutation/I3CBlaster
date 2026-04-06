@@ -676,55 +676,91 @@ i3c_hl_status_t __not_in_flash_func(i3c_hl_sdr_privwrite)(uint8_t addr, const ui
 	restore_interrupts(previntstate);
 	return retcode;
 }
-
-i3c_hl_status_t __not_in_flash_func(i3c_hl_sdr_privwriteread)(uint8_t addr, const uint8_t *pwritedat, uint32_t writebytecount,
-                                                                                  uint8_t *preaddat, uint32_t *preadbytecount)
+i3c_hl_status_t __not_in_flash_func(i3c_hl_sdr_privwriteread)(uint8_t addr, const uint8_t *pwritedat, uint32_t writebytecount, uint8_t *preaddat, uint32_t *preadbytecount)
 {
-	uint32_t previntstate = save_and_disable_interrupts();
-	i3c_hl_status_t retcode = i3c_hl_status_ok;
-	uint32_t readbytecount;
-	bool done;
+    uint32_t previntstate = save_and_disable_interrupts();
+    i3c_hl_status_t retcode = i3c_hl_status_ok;
 
-	if (i3c_ibi_type1_check())
-	{
-		retcode = i3c_hl_status_ibi;
-	}
-	if (retcode == i3c_hl_status_ok)
-	{
-		i3c_start();
-		
-		// BYPASS ARBITRATION HEADER: Go directly to the target address
-		retcode = i3c_sdr_write_addr(addr<<1);
-		
-		if (retcode == i3c_hl_status_ok)
-		{
-			while (writebytecount--)
-				i3c_sdr_write(*pwritedat++);
-			
-			i3c_restart();
-			retcode = i3c_sdr_write_addr((addr<<1) | 1);
-			if (retcode == i3c_hl_status_ok)
-			{
-				uint32_t readlen = *preadbytecount;
-				done = false;
-				readbytecount = 0;
-				while ( (readlen) && (!done) )
-				{
-					uint32_t value;
-					readlen--;
-					value = i3c_sdr_read(readlen==0);
-					done = !(value & 1);
-					*preaddat++ = value >>1;
-					readbytecount++;
-				}
-				*preadbytecount = readbytecount;
-			}
-		}
-		if (retcode != i3c_hl_status_ibi) // on a IBI getting received, don't terminate the transfer -> it has to be handled by i3c_poll function
-			i3c_stop();
-	}
-	restore_interrupts(previntstate);
-	return retcode;
+    if (i3c_ibi_type1_check()) {
+        retcode = i3c_hl_status_ibi;
+    }
+    
+    if (retcode == i3c_hl_status_ok)
+    {
+        i3c_start();
+        retcode = i3c_sdr_write_addr(addr << 1); 
+        
+        if (retcode == i3c_hl_status_ok)
+        {
+            /* --- PIPELINED WRITE PHASE --- */
+            i3c_pio_set_autopush(9); // Set once, no TX flush needed!
+            
+            if (writebytecount > 0) {
+                // 1. Prime the pump: Push the first byte into the TX FIFO
+                uint8_t val = pwritedat[0];
+                i3c_pio_put32(i3c_wdata_table[val*2+0]); 
+                i3c_pio_put32(i3c_wdata_table[val*2+1]);
+                i3c_pio_put32(I3CPIO_OPCODE_SCL0);
+                
+                // 2. The Loop: Push the NEXT byte, then wait for the CURRENT byte's ACK
+                for (uint32_t i = 1; i < writebytecount; i++) {
+                    val = pwritedat[i];
+                    i3c_pio_put32(i3c_wdata_table[val*2+0]);
+                    i3c_pio_put32(i3c_wdata_table[val*2+1]);
+                    i3c_pio_put32(I3CPIO_OPCODE_SCL0);
+                    
+                    i3c_pio_get32(); // Drain the previous byte's ACK (keeps RX FIFO clean)
+                }
+                // 3. Drain the very last byte's ACK
+                i3c_pio_get32(); 
+            }
+            
+            i3c_restart();
+            retcode = i3c_sdr_write_addr((addr << 1) | 1); // Read address
+            
+            if (retcode == i3c_hl_status_ok)
+            {
+                /* --- PIPELINED READ PHASE --- */
+                uint32_t readlen = *preadbytecount;
+                bool done = false;
+                uint32_t readbytecount = 0;
+                
+                i3c_pio_set_autopush(9); // Set once
+
+                if (readlen > 0) {
+                    // 1. Prime the pump: Request the first byte
+                    bool is_last = (readlen == 1);
+                    i3c_pio_put32(I3CPIO_OPCODE_XFER(6, SDR_RBIT(0), SDR_RBIT(0), SDR_RBIT(0), SDR_RBIT(0), SDR_RBIT(0), SDR_RBIT(0)));
+                    i3c_pio_put32(I3CPIO_OPCODE_XFER(3, SDR_RBIT(0), SDR_RBIT(0), SDR_RBIT(is_last), 0, 0, 0));
+                    i3c_pio_put32(I3CPIO_OPCODE_SCL0);
+                    
+                    // 2. The Loop: Request the NEXT byte, then fetch the CURRENT byte
+                    for (uint32_t i = 1; i < readlen; i++) {
+                        is_last = (i == (readlen - 1));
+                        
+                        // Queue the NEXT read command while PIO is clocking the current one
+                        i3c_pio_put32(I3CPIO_OPCODE_XFER(6, SDR_RBIT(0), SDR_RBIT(0), SDR_RBIT(0), SDR_RBIT(0), SDR_RBIT(0), SDR_RBIT(0)));
+                        i3c_pio_put32(I3CPIO_OPCODE_XFER(3, SDR_RBIT(0), SDR_RBIT(0), SDR_RBIT(is_last), 0, 0, 0));
+                        i3c_pio_put32(I3CPIO_OPCODE_SCL0);
+                        
+                        // Fetch the CURRENT byte's data
+                        uint32_t value = i3c_pio_get32();
+                        done = !(value & 1); // Check target status
+                        preaddat[readbytecount++] = value >> 1;
+                    }
+                    
+                    // 3. Fetch the very last byte's data
+                    uint32_t value = i3c_pio_get32();
+                    preaddat[readbytecount++] = value >> 1;
+                }
+                *preadbytecount = readbytecount;
+            }
+        }
+        if (retcode != i3c_hl_status_ibi) 
+            i3c_stop();
+    }
+    restore_interrupts(previntstate);
+    return retcode;
 }
 
 
