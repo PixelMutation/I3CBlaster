@@ -661,17 +661,14 @@ i3c_hl_status_t __not_in_flash_func(i3c_hl_sdr_privwrite)(uint8_t addr, const ui
 	if (retcode == i3c_hl_status_ok)
 	{
 		i3c_start();
-		retcode = i3c_arbhdr(&arbdata);
-
-		if ( retcode == i3c_hl_status_ok )
+		
+		// BYPASS ARBITRATION HEADER: Go directly to the target address
+		retcode = i3c_sdr_write_addr(addr<<1);
+		
+		if (retcode == i3c_hl_status_ok)
 		{
-			i3c_restart();
-			retcode = i3c_sdr_write_addr(addr<<1);
-			if (retcode == i3c_hl_status_ok)
-			{
-				while (bytecount--)
-					i3c_sdr_write(*pdat++);
-			}
+			while (bytecount--)
+				i3c_sdr_write(*pdat++);
 		}
 		if (retcode != i3c_hl_status_ibi) // on a IBI getting received, don't terminate the transfer -> it has to be handled by i3c_poll function
 			i3c_stop();
@@ -695,34 +692,32 @@ i3c_hl_status_t __not_in_flash_func(i3c_hl_sdr_privwriteread)(uint8_t addr, cons
 	if (retcode == i3c_hl_status_ok)
 	{
 		i3c_start();
-		retcode = i3c_arbhdr(NULL);
-		if ( retcode == i3c_hl_status_ok )
+		
+		// BYPASS ARBITRATION HEADER: Go directly to the target address
+		retcode = i3c_sdr_write_addr(addr<<1);
+		
+		if (retcode == i3c_hl_status_ok)
 		{
+			while (writebytecount--)
+				i3c_sdr_write(*pwritedat++);
+			
 			i3c_restart();
-			retcode = i3c_sdr_write_addr(addr<<1);
+			retcode = i3c_sdr_write_addr((addr<<1) | 1);
 			if (retcode == i3c_hl_status_ok)
 			{
-				while (writebytecount--)
-					i3c_sdr_write(*pwritedat++);
-				// step over to read phase
-				i3c_restart();
-				retcode = i3c_sdr_write_addr((addr<<1) | 1);
-				if (retcode == i3c_hl_status_ok)
+				uint32_t readlen = *preadbytecount;
+				done = false;
+				readbytecount = 0;
+				while ( (readlen) && (!done) )
 				{
-					uint32_t readlen = *preadbytecount;
-					done = false;
-					readbytecount = 0;
-					while ( (readlen) && (!done) )
-					{
-						uint32_t value;
-						readlen--;
-						value = i3c_sdr_read(readlen==0);
-						done = !(value & 1);
-						*preaddat++ = value >>1;
-						readbytecount++;
-					}
-					*preadbytecount = readbytecount;
+					uint32_t value;
+					readlen--;
+					value = i3c_sdr_read(readlen==0);
+					done = !(value & 1);
+					*preaddat++ = value >>1;
+					readbytecount++;
 				}
+				*preadbytecount = readbytecount;
 			}
 		}
 		if (retcode != i3c_hl_status_ibi) // on a IBI getting received, don't terminate the transfer -> it has to be handled by i3c_poll function
@@ -893,23 +888,20 @@ i3c_hl_status_t __not_in_flash_func(i3c_hl_sdr_privread)(uint8_t addr, uint8_t *
 	{
 		readbytecount = 0;
 		i3c_start();
-		retcode = i3c_arbhdr(NULL);
-		if ( retcode ==  i3c_hl_status_ok )
+		
+		// BYPASS ARBITRATION HEADER: Go directly to the target address
+		retcode = i3c_sdr_write_addr((addr<<1) | 1);
+		
+		if ( retcode == i3c_hl_status_ok )
 		{
-			i3c_restart();
-			retcode = i3c_sdr_write_addr((addr<<1) | 1);
-			if ( retcode == i3c_hl_status_ok )
+			done = false;
+			while ( (bytecount--) && (!done) )
 			{
-				
-				done = false;
-				while ( (bytecount--) && (!done) )
-				{
-					uint32_t value;
-					value = i3c_sdr_read(bytecount==0);
-					done = !(value & 1);
-					*pdat++ = value >>1;
-					readbytecount++;
-				}
+				uint32_t value;
+				value = i3c_sdr_read(bytecount==0);
+				done = !(value & 1);
+				*pdat++ = value >>1;
+				readbytecount++;
 			}
 		}
 		if (retcode != i3c_hl_status_ibi) // on a IBI getting received, don't terminate the transfer -> it has to be handled by i3c_poll function
