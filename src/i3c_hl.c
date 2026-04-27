@@ -270,8 +270,8 @@ i3c_hl_status_t i3c_init(uint8_t gpiobasepin)
     gpio_set_function(gpiobasepin+1, GPIO_FUNC_PIO0);
 	gpio_set_drive_strength(gpiobasepin, GPIO_DRIVE_STRENGTH_12MA);
 	gpio_set_drive_strength(gpiobasepin+1, GPIO_DRIVE_STRENGTH_12MA);
-	gpio_set_slew_rate(gpiobasepin, GPIO_SLEW_RATE_FAST);
-	gpio_set_slew_rate(gpiobasepin+1, GPIO_SLEW_RATE_FAST);
+	gpio_set_slew_rate(gpiobasepin, GPIO_SLEW_RATE_SLOW); //GPIO_SLEW_RATE_FAST
+	gpio_set_slew_rate(gpiobasepin+1, GPIO_SLEW_RATE_SLOW);
 	
 	gpio_init(gpiobasepin + 2); // init APU
 	gpio_disable_pulls(gpiobasepin+2); // disable APU pulls
